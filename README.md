@@ -38,7 +38,6 @@
 
 ## 2. 개발일정
 ![개발 일정](https://github.com/yourusername/ARR/raw/main/image/image000001.png)
-)
 
 ---
 
