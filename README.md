@@ -120,4 +120,4 @@
 ---
 
 ## 11. 작품사진
-![작품 사진](image/image00013.png)(image/image00013.png)
+![작품 사진](image/image00013.png,(image/image00013.png).
