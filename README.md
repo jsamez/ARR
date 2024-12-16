@@ -65,7 +65,6 @@
 | 사회적 영향| 음식물 쓰레기 배출을 줄이는 것을 목표로 설계합니다.                   |
 | 기능성     | 사용자가 쉽게 사용할 수 있도록 설계하였습니다.                      |
 
-![설계 제한 요소](image/image00004.png)
 
 ---
 
@@ -93,6 +92,7 @@
 
 ![DB 제작 알고리즘](image/image00011.png)
 ![메인 코드 알고리즘](image/image00012.png)
+
 ---
 
 ## 8. 자체 평가 및 소감
@@ -101,7 +101,6 @@
   - **원준혁:** 딥러닝 기술을 실생활 문제 해결에 적용하는 방법을 체험했습니다.
   - **장성민:** 객체 인식 학습자료 제작 과정을 이해하는 유익한 프로젝트였습니다.
   - **최진호:** 실시간 음식 재료 감지와 추천 요리 제공 과정이 흥미로웠으며, 추가 학습을 통한 인식 정확도 향상을 희망합니다.
-
 
 ---
 
@@ -115,7 +114,120 @@
 ---
 
 ## 10. 소스코드
-소스코드는 음식 재료를 인식하고 레시피를 추천하는 기능을 포함하고 있으며, 자세한 내용은 본 보고서의 소스코드 섹션에서 확인할 수 있습니다.
+
+### 요리명 검색 및 CSV 파일 저장
+```python
+import requests, json
+from bs4 import BeautifulSoup
+import csv
+
+def food_info(name):
+    url = f"https://www.10000recipe.com/recipe/list.html?q={name}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        html = response.text
+        soup = BeautifulSoup(html, 'html.parser')
+    else:
+        print("HTTP response error:", response.status_code)
+        return
+    food_list = soup.find_all(attrs={'class': 'common_sp_link'})
+    if not food_list:
+        print(f"'{name}'에 해당하는 음식을 찾을 수 없습니다.")
+        return
+    food_id = food_list[0]['href'].split('/')[-1]
+    new_url = f'https://www.10000recipe.com/recipe/{food_id}'
+    new_response = requests.get(new_url)
+    if new_response.status_code == 200:
+        html = new_response.text
+        soup = BeautifulSoup(html, 'html.parser')
+    else:
+        print("HTTP response error:", new_response.status_code)
+        return
+    food_info = soup.find(attrs={'type': 'application/ld+json'})
+    result = json.loads(food_info.text)
+    ingredient = ','.join(result['recipeIngredient'])
+    recipe = [f'{i + 1}. {step["text"]}' for i, step in enumerate(result['recipeInstructions'])]
+    res = {'name': name, 'ingredients': ingredient, 'recipe': recipe}
+    return res
+
+def append_to_csv(values, filename='food_info.csv'):
+    try:
+        with open(filename, 'x', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['음식 이름', '재료', '레시피'])  # CSV 헤더
+            writer.writerows(values)
+    except FileExistsError:
+        with open(filename, 'a', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerows(values)
+    print("CSV 정보가 파일에 성공적으로 추가되었습니다.")
+
+# 사용자 입력 받기
+food_name = input("검색하고 싶은 한국 음식 이름을 입력하세요: ")
+food_details = food_info(food_name)
+if food_details:
+    print(f"음식 이름: {food_details['name']}")
+    print(f"재료: {food_details['ingredients']}")
+    print("레시피:")
+    for step in food_details['recipe']:
+        print(step)
+    csv_values = [[food_details['name'], food_details['ingredients'], " ".join(food_details['recipe'])]]
+    append_to_csv(csv_values)
+else:
+    print("음식 정보를 가져오는 데 실패했습니다.")
+```
+
+### YOLO 모델을 활용한 음식 재료 인식 및 레시피 추천
+```python
+import cv2
+import torch
+from ultralytics import YOLO
+import pandas as pd
+import tkinter as tk
+from tkinter import messagebox, Listbox, Toplevel, Button, Scrollbar, END, Text
+
+# YOLOv8 모델 로드
+model = YOLO('C:/train_data/YOLOv8/runs/detect/train10/weights/best.pt', verbose=False)
+
+# 데이터베이스 불러오기
+df = pd.read_csv('food_info.csv', encoding='ANSI', sep=',')
+df['재료'] = df['재료'].fillna('')
+
+# 레시피 매핑
+recipes = {}
+for _, row in df.iterrows():
+    recipe_info = {'ingredients': row['재료'].split(','), 'recipe': row['레시피'], 'name': row['음식 이름']}
+    recipes[frozenset(recipe_info['ingredients'])] = recipe_info
+
+# 레시피 추천 함수
+def recommend_recipe(detected_ingredients, main_ingredient):
+    detected_set = frozenset(detected_ingredients)
+    recommended_recipes = [recipe['name'] for ingredients, recipe in recipes.items()
+                            if len(ingredients & detected_set) >= 2 and main_ingredient in ingredients]
+    return recommended_recipes if recommended_recipes else None
+
+# Tkinter GUI 및 프레임 업데이트
+root = tk.Tk()
+root.title("Food Detection and Recipe Recommendation")
+cap = cv2.VideoCapture(0)
+def update_frame():
+    global detected_once
+    ret, frame = cap.read()
+    if not ret:
+        messagebox.showerror("오류", "웹캠에서 프레임을 읽을 수 없습니다.")
+        return
+    results = model(frame, verbose=False)
+    detected_ingredients = set([model.names[int(detection.cls)] for result in results for detection in result.boxes])
+    cv2.imshow('Food Detection', frame)
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        root.quit()
+    root.after(10, update_frame)
+root.after(10, update_frame)
+root.mainloop()
+cap.release()
+cv2.destroyAllWindows()
+```
 
 ---
 
